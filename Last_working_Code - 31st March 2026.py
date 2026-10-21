@@ -1,0 +1,262 @@
+from playwright.sync_api import sync_playwright
+import time
+from datetime import datetime
+
+ROLLNO = "251280070003"
+PASSWORD = "07/08/2000"
+LOGIN_TEXT = "Hello YOGI RANCHHOD PATEL"
+URL = "https://portal.manipal.edu/statistics/I11"
+
+priority_order = [
+    "suresha.kharvi@manipal.edu",
+    "satya.narayana@manipal.edu",
+    "vasudev.guddattu@manipal.edu",
+    "bhagyajyothi.rao@manipal.edu"
+]
+
+
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+
+def login(page):
+    log("Logging in...")
+
+    page.goto(URL, timeout=60000)
+
+    page.select_option("select", value="S")
+    page.get_by_role("button", name="CONTINUE").click()
+
+    page.wait_for_selector("input[type='password']", timeout=60000)
+
+    page.locator("input[type='text']").first.fill(ROLLNO)
+    page.locator("input[type='password']").fill(PASSWORD)
+
+    page.get_by_role("button", name="LOGIN").click()
+    page.wait_for_load_state("networkidle")
+
+    page.get_by_role("link", name="CONSULTATION DETAILS").click()
+    page.wait_for_load_state("networkidle")
+
+    log("Login successful")
+
+
+def is_logged_in(page):
+    try:
+        return page.get_by_text(LOGIN_TEXT).count() > 0
+    except:
+        return False
+
+
+def parse_datetime(date_str, time_str):
+    try:
+        return datetime.strptime(f"{date_str} {time_str}", "%d/%m/%Y %H:%M")
+    except:
+        return None
+
+
+def times_overlap(t1, t2):
+    if not t1 or not t2:
+        return False
+    return abs((t1 - t2).total_seconds()) < 1800
+
+
+def get_selected_consultations(page):
+    results = []
+    try:
+        section = page.locator("text=Consultations Selected").locator("..")
+        table = section.locator("table")
+        rows = table.locator("tr")
+
+        for i in range(rows.count()):
+            row = rows.nth(i)
+            cells = row.locator("td")
+
+            if cells.count() == 0:
+                continue
+
+            values = [cells.nth(j).inner_text().strip() for j in range(cells.count())]
+
+            try:
+                email = values[10]
+                date = values[8]
+                time_val = values[9]
+                dt = parse_datetime(date, time_val)
+
+                if dt:
+                    results.append({
+                        "email": email,
+                        "datetime": dt
+                    })
+            except:
+                continue
+    except:
+        log("Error reading selected consultations")
+
+    return results
+
+
+def count_weekly_consultations(selected):
+    week_counts = {}
+
+    for item in selected:
+        dt = item["datetime"]
+        year, week, _ = dt.isocalendar()
+        key = (year, week)
+        week_counts[key] = week_counts.get(key, 0) + 1
+
+    return week_counts
+
+
+def check_and_click(page):
+    try:
+        log("Scanning upcoming consultations...")
+
+        selected = get_selected_consultations(page)
+        week_counts = count_weekly_consultations(selected)
+
+        section = page.locator("text=Upcoming Consultations").locator("..")
+        table = section.locator("table")
+        rows = table.locator("tr")
+
+        candidates = []
+
+        for i in range(rows.count()):
+            row = rows.nth(i)
+            cells = row.locator("td")
+
+            if cells.count() == 0:
+                continue
+
+            row_text = row.inner_text().lower()
+
+            for email in priority_order:
+                if email in row_text:
+                    cell_values = [cells.nth(j).inner_text().strip() for j in range(cells.count())]
+
+                    try:
+                        date = cell_values[8]
+                        time_val = cell_values[9]
+                    except:
+                        continue
+
+                    dt = parse_datetime(date, time_val)
+                    if not dt:
+                        continue
+
+                    year, week, _ = dt.isocalendar()
+                    key = (year, week)
+
+                    if week_counts.get(key, 0) >= 2:
+                        log(f"Skipped (weekly limit): {email} {dt}")
+                        continue
+
+                    checkbox = row.locator("input[type='checkbox']")
+                    if checkbox.count() == 0:
+                        continue
+
+                    candidates.append({
+                        "row": row,
+                        "email": email,
+                        "datetime": dt,
+                        "checked": checkbox.first.is_checked(),
+                        "priority": priority_order.index(email),
+                        "week_key": key
+                    })
+
+        candidates.sort(key=lambda x: x["priority"])
+
+        selected_slots = [(item["datetime"], item["email"]) for item in selected]
+        clicked_any = False
+
+        for item in candidates:
+            dt = item["datetime"]
+
+            if item["checked"]:
+                log(f"Already selected: {item['email']} {dt}")
+                selected_slots.append((dt, item["email"]))
+                continue
+
+            conflict = False
+
+            for existing_dt, existing_email in selected_slots:
+                if existing_email == item["email"]:
+                    continue  # allow same faculty back-to-back
+
+                if times_overlap(dt, existing_dt):
+                    conflict = True
+                    break
+
+            if conflict:
+                log(f"Skipped (overlap diff faculty): {item['email']} {dt}")
+                continue
+
+            log(f"CLICKING: {item['email']} at {dt}")
+            item["row"].locator("input[type='checkbox']").first.click()
+
+            selected_slots.append((dt, item["email"]))
+            week_counts[item["week_key"]] = week_counts.get(item["week_key"], 0) + 1
+            clicked_any = True
+
+        if not candidates:
+            log("No matching consultations found")
+
+        return clicked_any
+
+    except Exception as e:
+        log(f"Table processing error: {e}")
+        return False
+
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    context = browser.new_context()
+    page = context.new_page()
+
+    last_success_time = time.time()
+    last_warning_time = 0
+
+    log("Bot started")
+
+    while True:
+        try:
+            if not is_logged_in(page):
+                login(page)
+
+            log("Refreshing page...")
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_selector("text=Upcoming Consultations", timeout=60000)
+
+            clicked = check_and_click(page)
+
+            if clicked:
+                log("Waiting 20s for confirmation...")
+                time.sleep(20)
+
+                page.reload(wait_until="domcontentloaded")
+                page.wait_for_selector("text=Consultations Selected", timeout=60000)
+
+                results = get_selected_consultations(page)
+
+                if results:
+                    log("=== CONFIRMED CONSULTATIONS ===")
+                    for r in results:
+                        log(f"{r['email']} | {r['datetime']}")
+                    log("================================")
+
+                last_success_time = time.time()
+
+            current_time = time.time()
+
+            if current_time - last_success_time > 600:
+                if current_time - last_warning_time > 600:
+                    log("Bot running. No bookings yet.")
+                    last_warning_time = current_time
+
+            time.sleep(1)
+
+        except Exception as e:
+            log(f"Error: {str(e)}")
+            time.sleep(5)
+
+    browser.close()
