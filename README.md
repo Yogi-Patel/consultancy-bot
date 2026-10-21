@@ -15,10 +15,19 @@ pip install playwright
 playwright install chromium
 ```
 
+### Where are you running it?
+
+| Where | Use this script | Notes |
+|---|---|---|
+| **Your own PC** | `local_bot.py` | Gives the detailed log (prints your bookings and the reason for each skip) and clears the console every 500 scans with `cls`, which only works on Windows. |
+| **A cloud platform** | `click_bot.py` | **Go through `cloud_readme` as well as this README before deploying.** |
+| **A PC with fairly little resources** | `click_bot.py` | Quiet log and one tick per scan. |
+
 Open the script you want to use and check the settings at the top (section 6). Then run it with the hourly restart wrapper:
 
 ```
-python run_hourly.py click_bot.py
+python run_hourly.py click_bot.py      # cloud platform, or a PC with little resources
+python run_hourly.py local_bot.py      # your own PC
 ```
 
 Stop with **Ctrl+C**. The wrapper stops the bot and its Chromium together.
@@ -65,7 +74,7 @@ If the portal changes and the bots stop reading dates, check these positions fir
 
 | | `click_bot.py` | `local_bot.py` | `click_unclick_bot.py` | `Last_working_Code - 31st March 2026.py` | `test_bot.py` |
 |---|---|---|---|---|---|
-| **Role** | **Recommended base** | Same logic, noisier, Windows | Experimental | Old reference | Debugging |
+| **Role** | **Recommended base.** Cloud platform, or a PC with little resources | **Your own PC.** Same logic, noisier, Windows | Experimental | Old reference | Debugging |
 | Browser | Headless | Headless | Headless + Linux flags (`--no-sandbox`, `--disable-dev-shm-usage`) | Headless | **Visible window** |
 | Skips images, fonts, CSS | Yes | Yes | Yes | No | No |
 | Faculty (priority order) | suresha, bhagyajyothi, satya | suresha, bhagyajyothi, satya | suresha, bhagyajyothi, satya, vasudev, **varunsg** | suresha, satya, vasudev, bhagyajyothi | suresha, satya, vasudev |
@@ -80,8 +89,8 @@ If the portal changes and the bots stop reading dates, check these positions fir
 | Other | | `cls` every 500 scans (Windows only) | Two old versions left as comments at the bottom | | Email code present but disabled |
 
 ### Which to use
-- **`click_bot.py`** is the best base. It reads your bookings from the right table, ticks one slot per scan and then re-reads your bookings, so the weekly and daily caps stay accurate.
-- **`local_bot.py`** if you want to grab several slots in the same pass and want the detailed log. It does not update its counts between ticks, so it can go over your weekly or daily limit.
+- **`click_bot.py`** is the best base, and the one to use on a **cloud platform or a PC with fairly little resources**. It reads your bookings from the right table, ticks one slot per scan and then re-reads your bookings, so the weekly and daily caps stay accurate.
+- **`local_bot.py`** is for running on **your own PC**. It gives the detailed log and grabs several slots in the same pass. It does not update its counts between ticks, so it can go over your weekly or daily limit.
 - **`click_unclick_bot.py`** only if plain ticks do not register. The click, untick, click sequence is not part of the normal workflow, and each toggle may send its own request to the server, so it could release the slot.
 - **`Last_working_Code`** and **`test_bot.py`** read your bookings with columns 8/9/10, which does not fit the current 11-column table. They would probably not see your bookings, so the caps would not work. Keep `test_bot.py` only for watching what the page does in a visible browser.
 
@@ -199,6 +208,7 @@ Behaviour to know about:
 - The last table was empty that day, so its columns were not seen. The scripts assume the 11-column layout.
 - `run_hourly.py` was tested on Linux with a dummy bot only. The Windows stop command (`taskkill /T /F`) and a real Playwright run have not been tested.
 - The inference in known issue 3 about ticked rows.
+- `cloud_readme` was not available when this README was written, so nothing here describes its contents. The rule for which script to use where (`local_bot.py` on your own PC, `click_bot.py` on a cloud platform or a low-resource PC) comes from you and was not tested.
 
 ---
 
@@ -212,4 +222,5 @@ Behaviour to know about:
 | `Last_working_Code - 31st March 2026.py` | Old reference version |
 | `test_bot.py` | Visible-browser debugging version |
 | `run_hourly.py` | Restart wrapper |
+| `cloud_readme` | Steps for deploying to a cloud platform. Read it together with this README before deploying. |
 | `README.md` | This file |

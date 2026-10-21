@@ -11,8 +11,8 @@ priority_order = [
     "suresha.kharvi@manipal.edu",
     "bhagyajyothi.rao@manipal.edu",
     "satya.narayana@manipal.edu",
-    #"vasudev.guddattu@manipal.edu",
-    #"varunsg.kumar@manipal.edu"
+    "vasudev.guddattu@manipal.edu",
+    "varunsg.kumar@manipal.edu"
 ]
 
 

@@ -19,8 +19,8 @@ priority_order = [
     "suresha.kharvi@manipal.edu",
     "bhagyajyothi.rao@manipal.edu",
     "satya.narayana@manipal.edu",
-    #"vasudev.guddattu@manipal.edu",
-    #"varunsg.kumar@manipal.edu"
+    "vasudev.guddattu@manipal.edu",
+    "varunsg.kumar@manipal.edu"
 ]
 
 
@@ -178,11 +178,11 @@ def check_and_click(page):
                     week_key = dt.isocalendar()[:2]
                     day_key = dt.date()
 
-                    if week_counts.get(week_key, 0) >= 4:
+                    if week_counts.get(week_key, 0) >= 2:
                         log(f"Skipped (weekly limit): {student} {email} {dt}")
                         break
 
-                    if day_counts.get(day_key, 0) >= 3:
+                    if day_counts.get(day_key, 0) >= 2:
                         log(f"Skipped (daily limit): {student} {email} {dt}")
                         break
 
