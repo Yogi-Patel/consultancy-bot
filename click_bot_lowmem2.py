@@ -9,15 +9,17 @@ URL = "https://portal.manipal.edu/statistics/I11"
 
 priority_order = [
     "suresha.kharvi@manipal.edu",
-    "bhagyajyothi.rao@manipal.edu",
     "satya.narayana@manipal.edu",
+    "bhagyajyothi.rao@manipal.edu",
     "vasudev.guddattu@manipal.edu",
     "varunsg.kumar@manipal.edu"
 ]
 
 
 def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    _clear_status_line()
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+    _redraw_status_line()
 
 
 # --- quiet logging ----------------------------------------------------------
@@ -34,6 +36,69 @@ _error_repeats = 0
 _pass_had_error = False
 _refresh_announced = False
 _last_refresh_mem = None
+
+
+# --- live status line ---------------------------------------------------------
+# The last line of the console shows the time of the last completed scan and keeps
+# updating (at most once a second), so a quiet console is still visibly alive.
+#   run_hourly.py sets BOT_STATUS_PIPE=1: the bot only reports, the wrapper draws it;
+#   run directly in a console: the bot draws the line itself;
+#   output going to a file: nothing is drawn.
+import os
+import shutil
+import sys
+
+if os.environ.get("BOT_STATUS_PIPE") == "1":
+    _STATUS_MODE = "wrapper"
+elif sys.stdout.isatty():
+    _STATUS_MODE = "console"
+    if os.name == "nt":
+        os.system("")  # switches on escape-code support in older Windows consoles
+else:
+    _STATUS_MODE = "off"
+_scans = 0
+_last_status_t = 0.0
+_status_text = ""
+
+
+def _clear_status_line():
+    if _STATUS_MODE == "console" and _status_text:
+        sys.stdout.write("\r\x1b[K")
+
+
+if _STATUS_MODE == "console":
+    # Make sure a crash or Ctrl+C traceback starts on a clean line, not glued to the status text.
+    _orig_excepthook = sys.excepthook
+
+    def _clean_excepthook(*exc):
+        _clear_status_line()
+        _orig_excepthook(*exc)
+
+    sys.excepthook = _clean_excepthook
+
+
+def _redraw_status_line():
+    if _STATUS_MODE == "console" and _status_text:
+        sys.stdout.write(_status_text)
+        sys.stdout.flush()
+
+
+def scan_done():
+    """Called after each completed scan; refreshes the status line at most once a second."""
+    global _scans, _last_status_t, _status_text
+    _scans += 1
+    now = time.time()
+    if _STATUS_MODE == "off" or now - _last_status_t < 1.0:
+        return
+    _last_status_t = now
+    stamp = datetime.now().strftime("%H:%M:%S")
+    if _STATUS_MODE == "wrapper":
+        print(f"\x01STATUS scans={_scans} last={stamp}", flush=True)
+    else:
+        width = shutil.get_terminal_size((80, 20)).columns - 1
+        _status_text = f"Last scan {stamp} | {_scans:,} scans"[:width]
+        sys.stdout.write("\r\x1b[K" + _status_text)
+        sys.stdout.flush()
 
 
 def print_selected(selected):
@@ -100,10 +165,13 @@ def begin_pass():
 
 
 def pass_finished():
-    """Call at the end of a loop pass; says so when a repeating error has stopped."""
+    """Call at the end of a loop pass: says so when a repeating error has stopped,
+    and refreshes the live status line."""
     if not _pass_had_error and _last_error is not None:
         _end_error_run()
         log("Back to normal: no errors on the last scan.")
+    if not _pass_had_error:
+        scan_done()
 
 
 def announce_refresh(reloads, mem):

@@ -11,9 +11,11 @@ Bots for the Manipal **Statistical Consultancy Services** portal (course curricu
 Install once:
 
 ```
-pip install playwright
+pip install playwright psutil
 playwright install chromium
 ```
+
+(`psutil` is optional but needed for the memory limit in `run_hourly.py`, the memory figure on its status line, and the memory readout in the `_lowmem2` scripts.)
 
 ### Where are you running it?
 
@@ -30,7 +32,22 @@ python run_hourly.py click_bot.py      # cloud platform, or a PC with little res
 python run_hourly.py local_bot.py      # your own PC
 ```
 
+**For anything longer than a few minutes, use the `_lowmem2` version of the same script** (see known issue 8). On the original scripts, Python's memory grew by roughly 100 MB a minute in testing:
+
+```
+python run_hourly.py click_bot_lowmem2.py      # click_bot.py with the memory fix
+python run_hourly.py local_bot_lowmem2.py      # local_bot.py with the memory fix
+```
+
 Stop with **Ctrl+C**. The wrapper stops the bot and its Chromium together.
+
+**How to tell it is working:** look at the **last line of the console**. It is a live status line that updates every second, even when no log lines are appearing:
+
+```
+14:10:42 | last scan 1 s ago | 1,234 scans | 480 MB | restart in 17 min
+```
+
+If the clock moves and `last scan` stays at 0 to 2 seconds, the bot is working. See "The live status line" in section 3.
 
 ---
 
@@ -94,6 +111,53 @@ If the portal changes and the bots stop reading dates, check these positions fir
 - **`click_unclick_bot.py`** only if plain ticks do not register. The click, untick, click sequence is not part of the normal workflow, and each toggle may send its own request to the server, so it could release the slot.
 - **`Last_working_Code`** and **`test_bot.py`** read your bookings with columns 8/9/10, which does not fit the current 11-column table. They would probably not see your bookings, so the caps would not work. Keep `test_bot.py` only for watching what the page does in a visible browser.
 
+### What the `_lowmem2` scripts print
+
+They print a line only when something changes, so **a quiet console is normal**. The live status line at the bottom (explained after this table) shows that it is still scanning. Over a 60-second test where the portal changed on a script, the previous version printed 130 lines (`click_bot`) and 541 lines (`local_bot`); these print 20.
+
+| Line | When it appears |
+|---|---|
+| `Bot started`, `Logging in...`, `Login successful` | At start, and again only if the session drops |
+| `=== CURRENT BOOKINGS ===` block, or `No consultations booked yet.` | Once at start, then only when your bookings change. A failed read of the table prints nothing, so it cannot cause a false "no bookings" line |
+| `Free slot:`, `Already selected:`, `Skipped (weekly limit)`, `Skipped (daily limit)`, `Skipped (overlap)`, `Skipped (no checkbox)` followed by the request number, faculty and date | When a slot for one of your faculty appears or its status changes |
+| `No longer listed: ...` | When a slot disappears |
+| `No matching consultations right now.` | Once at start, and when the last matching slot disappears |
+| `CLICKING: ...` | Every time it ticks a box. This exact word is what `run_hourly.py` watches for, so it was left unchanged |
+| An error line (first line of the message only) | Once. Identical repeats are counted: `(that error repeated N more times)`, then `Back to normal: no errors on the last scan.` |
+| `Fresh browser context started ... bot memory was N MB` | The first refresh only, then again only if the bot's memory has moved by 25 MB or more (`REFRESH_MEMORY_STEP_MB`). Without `psutil`, only the first one |
+
+Other points:
+- Lines show the **request number** where older logs said "student" (known issue 2).
+- `local_bot_lowmem2.py` no longer clears the screen every 500 scans (`cls` removed), because with quiet logging it would erase the history you want to keep.
+- The last line of the console is a live status line that updates every second. That is the sign of life while the bot is quiet.
+
+### The live status line
+
+The bottom line of the console is redrawn every second. It is never written into the scrollback: log lines scroll up above it.
+
+**Started through `run_hourly.py`** (the normal way):
+
+```
+14:10:42 | last scan 1 s ago | 1,234 scans | 480 MB | restart in 17 min
+```
+
+| Part | What it tells you |
+|---|---|
+| `14:10:42` | The current time, from the wrapper. If it stops moving, the console is paused or the wrapper is stuck. |
+| `last scan 1 s ago` | The bot's heartbeat: seconds since the bot last finished a scan. **Normal is 0 to 2.** If it keeps growing, the bot is not completing scans (page broken, portal down, login lost). An error line will have been printed above it. |
+| `1,234 scans` | Scans completed since the bot last (re)started. A scan that hit an error is not counted. |
+| `480 MB` | Memory used by the bot and its browser together. Needs `psutil`. |
+| `restart in 17 min` | Countdown to the next scheduled restart (it switches to seconds in the last 90 s). |
+
+Until the first scan completes after a (re)start, the line shows `running` in place of the scan fields.
+
+**Started directly** (`python click_bot_lowmem2.py`): the bot draws its own line, `Last scan 14:10:42 | 1,234 scans`. If that time stops changing, the bot is stuck.
+
+Good to know:
+- `last scan` proves the bot is **scanning**. It does not say whether any slots exist. For that, read the log lines above it (`Free slot`, `Already selected`, `No matching consultations right now.`).
+- It is drawn only when the output is a console. If you redirect the output to a file (`> bot.log`), no status line and no control characters are written.
+- The original scripts (`click_bot.py`, `local_bot.py`) send no scan reports, so through the wrapper their status line shows `running` with the clock, memory and restart countdown, but no `last scan`.
+
 ---
 
 ## 4. Running the scripts
@@ -118,7 +182,7 @@ python click_bot.py > bot.log 2>&1
 
 ## 5. `run_hourly.py`: automatic restart wrapper
 
-It runs a bot, stops it (and the Chromium it started) after N minutes, and starts it again. This stops Chromium's memory from creeping up over a long run. It does not change the bot.
+It runs a bot, stops it (and the Chromium it started) after N minutes, and starts it again. It also restarts the bot early if the bot and its browser together use more than a memory limit (default 1500 MB, needs `psutil`). It does not change the bot. While it runs, the bottom line of the console shows the live status line (section 3).
 
 ```
 python run_hourly.py                                   # click_bot.py, restart every 60 minutes
@@ -128,6 +192,8 @@ python run_hourly.py local_bot.py --minutes 30         # use a different bot
 python run_hourly.py click_bot.py --minutes 2          # short test cycle: watch it restart
 python run_hourly.py click_bot.py --grace 90           # wait 90 s after a tick before restarting
 python run_hourly.py click_bot.py --max-wait 120       # never delay a restart more than 2 minutes
+python run_hourly.py click_bot_lowmem2.py --max-mb 1000   # restart if bot + browser pass 1000 MB
+python run_hourly.py click_bot_lowmem2.py --max-mb 0      # switch the memory limit off
 python run_hourly.py "Last_working_Code - 31st March 2026.py"
 python run_hourly.py --help
 ```
@@ -138,11 +204,15 @@ python run_hourly.py --help
 | `--minutes` | 60 | How long each run lasts. |
 | `--grace` | 60 | If the bot ticked a slot this recently (it prints a line containing `CLICKING`), the restart waits. |
 | `--max-wait` | 300 | The longest the restart can be delayed by `--grace`. |
+| `--max-mb` | 1500 | Restart the bot if it, the Playwright driver and Chromium together pass this many MB. `0` turns it off. Without `psutil` it is off and a warning is printed. A fresh bot with its browser used about 480 MB in testing, so do not set it near that. |
 
 Behaviour to know about:
 - If the bot crashes or exits by itself, it is started again after 5 seconds. If it exits immediately every time (for example after a typo), the wrapper keeps retrying every 5 seconds, so stop it with Ctrl+C.
 - The bot is offline while it relaunches and logs in again, which can take from several seconds to about a minute. Avoid hours when slots usually appear.
 - The grace logic depends on the log text `CLICKING`. If you change that line in a bot, the wrapper stops noticing ticks.
+- The wrapper starts the bot with the environment variable `BOT_STATUS_PIPE=1`. A `_lowmem2` bot then sends its scan reports to the wrapper (they are not printed) and the wrapper draws the status line. Without the wrapper, the bot draws its own.
+- The wrapper no longer prints a memory line every 5 minutes: the memory is part of the status line.
+- With `psutil` missing, the memory limit is off, the status line has no memory figure, and a warning is printed once.
 
 ---
 
@@ -163,17 +233,24 @@ Behaviour to know about:
 1. **3-second wait** in `click_bot.py` and `local_bot.py`. If the server has not registered the tick when the page reloads, the row can still look unticked and the bot may tick it again.
 2. **Wrong label in the logs:** for Upcoming rows the code reads column 1, which is the Request No, and calls it `student`. The student's name is column 2.
 3. **Overlap check:** every ticked row in Upcoming is treated as yours. The ticked rows seen on 21 Oct carried other students' names, so another student's slot could wrongly block one of yours within 30 minutes (different faculty only). This is an inference from the names.
-4. **Console noise:** `Scanning...` prints about 7 times a second and the real events get buried. `click_bot.py` also never prints your bookings.
+4. **Console noise (fixed in the `_lowmem2` scripts):** the original scripts print `Scanning...` about 7 times a second, so the real events get buried, and `click_bot.py` never prints your bookings. The `_lowmem2` scripts print only when something changes (see "What the `_lowmem2` scripts print" in section 3).
 5. **`local_bot.py`** ticks all eligible rows in one pass without updating its counts, so it can exceed the caps.
 6. **Housekeeping:** password in plain text, bare `except:` blocks that hide errors, `browser.close()` after an endless loop (never runs), `cls` only works on Windows, and `click_unclick_bot.py` has two dead copies of old code at the bottom.
 7. **Different caps** in different scripts (see the table above).
+8. **Python's memory climbs during long runs (fixed in the `_lowmem2` scripts, not yet confirmed on the real portal).** On 21 Oct on Windows, Task Manager showed one Python process growing from about 100 MB to over 1 GB within minutes.
+   - **Cause (measured on a local test page, not on the real portal):** the `context.route(...)` handler that blocks images, fonts and CSS makes Playwright's Python client keep a Route and a Request object for *every sub-request of every reload* until the browser context closes. On a heavy page (about 60 requests) the bot's Python memory went from 64 MB to 165 MB in 200 reloads, and the Playwright driver grew too.
+   - **Fix in `click_bot_lowmem2.py` and `local_bot_lowmem2.py`:** images, fonts and CSS are blocked inside the browser (no per-request Python work), and the bot moves to a fresh browser context every 100 reloads or 2 minutes (login cookies carried over; never within 30 seconds of a tick). In the same test, Python stayed flat at about 35 MB.
+   - **Difference to know about:** blocking now works by file extension (`.png`, `.css`, `.woff` and similar, including with a query string). Images or CSS served from addresses with no extension are no longer blocked, so pages may load slightly more.
+   - **Backstop:** `run_hourly.py --max-mb` restarts the bot if total memory goes over the limit, whatever the cause.
 
 ---
 
 ## 8. Memory and performance
 
 - **Printing does not use meaningful RAM.** The terminal keeps a capped scrollback. A log file of `Scanning...` lines grows well under 1 MB an hour at 7 lines a second.
-- **Chromium memory can creep up** over hours of reloading every 0.15 s. The hourly restart (section 5) is the main fix.
+- **The bot's own Python memory** was the bigger problem: see known issue 8. Use the `_lowmem2` scripts.
+- **Chromium memory can creep up** over hours of reloading every 0.15 s. The hourly restart and the memory limit (section 5) handle that.
+- **How to tell which process is growing:** Task Manager, Details tab, add the "Command line" column. `python.exe` rows are the bot or the wrapper; `chrome-headless-shell.exe` is the browser; `node.exe` is Playwright's driver.
 - **Other ways to lighten the load:**
   - Read the tables in one in-page call instead of one call per cell.
   - Poll fast only around the times slots appear, and slowly otherwise.
@@ -193,6 +270,11 @@ Behaviour to know about:
 | Login keeps repeating | `LOGIN_TEXT` does not match, wrong role value, or wrong password format | The greeting on the page; role `S` |
 | `Cannot find click_bot.py` | Run from the wrong folder | `cd` to the folder with the scripts |
 | Extra Chrome processes after a crash | Bot was killed without cleanup | Use `run_hourly.py`, or end them in Task Manager |
+| Memory keeps climbing | Running an original script (known issue 8) | Switch to a `_lowmem2` script. Its log prints "Fresh browser context started ... bot memory was N MB" about every 100 reloads; that number should stay roughly flat (tens of MB). If it does not, tell whoever maintains this, with those lines |
+| `run_hourly.py` restarts the bot over and over with "memory limit reached" | `--max-mb` is set too low for your machine | Raise it, or use `--max-mb 0` |
+| No new log lines for minutes | Normal for a `_lowmem2` script: it prints only on changes | Look at the status line at the bottom. Clock moving and `last scan` at 0 to 2 s: it is working. Clock moving but `last scan` keeps growing: the bot is stuck or the page is broken, so read the last error line above it. Clock frozen: the console is paused (click in the window and press Enter) or the wrapper is stuck |
+| `last scan` is growing and an error line says a timeout | The portal is down, your session dropped, or the page layout changed | Open the portal in a normal browser. If the page looks different, see section 2 and "Dates not read" |
+| Odd characters such as `←[K` or `[2K` in the console | An old console without escape-code support | Use Windows Terminal or PowerShell, or redirect the output to a file (no status line is drawn then) |
 
 ---
 
@@ -208,6 +290,10 @@ Behaviour to know about:
 - The last table was empty that day, so its columns were not seen. The scripts assume the 11-column layout.
 - `run_hourly.py` was tested on Linux with a dummy bot only. The Windows stop command (`taskkill /T /F`) and a real Playwright run have not been tested.
 - The inference in known issue 3 about ticked rows.
+- The memory cause in known issue 8 was found on a local test page with a stand-in for the portal. The real portal's page weight and reload rate were not measured.
+- `click_bot_lowmem2.py`, `local_bot_lowmem2.py` and the `--max-mb` limit were tested only on Linux against a local mock of the portal: refreshes by reload count and by time, no refresh while ticking, no image or CSS requests reaching the server, the wrapper restarting on the limit and cleaning up Chromium. Not tested on Windows or on the real portal.
+- The change-only logging was tested on Linux against a mock portal that changed on a timeline (slot appears, is ticked, booking appears, overlap skip, slots disappear, page breaks and recovers), and its helper functions were unit-tested. The real portal's pages and the real Windows console were not used, so the exact wording of a real error line may differ.
+- The live status line was tested on Linux in a pseudo-terminal drawn by a terminal emulator, against the same mock portal: the clock changed on nearly every second, only one status line was on screen at a time, `last scan` stayed at 0 to 3 s while the mock page was healthy and grew to about 12 s while it was broken, log lines scrolled above the line without leaving copies of it, a bot with no scan reports showed `running`, and with output sent to a file no control characters were written. The Windows consoles (Command Prompt, PowerShell, Windows Terminal) were not tested. The code switches on escape-code support with `os.system("")`, a common step older Windows consoles need.
 - `cloud_readme` was not available when this README was written, so nothing here describes its contents. The rule for which script to use where (`local_bot.py` on your own PC, `click_bot.py` on a cloud platform or a low-resource PC) comes from you and was not tested.
 
 ---
@@ -217,6 +303,8 @@ Behaviour to know about:
 | File | Purpose |
 |---|---|
 | `click_bot.py` | Recommended bot |
+| `click_bot_lowmem2.py` | `click_bot.py` plus the memory fix from known issue 8 and change-only logging. Use this one for long runs. |
+| `local_bot_lowmem2.py` | `local_bot.py` plus the same memory fix and change-only logging (screen clearing removed). Use this one for long runs on your own PC. |
 | `local_bot.py` | Verbose variant, ticks all eligible rows |
 | `click_unclick_bot.py` | Experimental click/untick/click variant |
 | `Last_working_Code - 31st March 2026.py` | Old reference version |
